@@ -1,7 +1,7 @@
 # Datalink lua script for moonloader
 Script have 2 versions:
-1. For [RakSAMP Lite](Lua/Raksamp/dlink.lua) - can be used with [RakSAMP Lite Bot](https://www.blast.hk/threads/108052/). This [script](Lua/Raksamp/dlink.lua) laying in [Raksamp](Lua/Raksamp) folder;
-2. For [GTA](Lua/gtasamp/dlink.lua) - can be used in PC version of [San Andreas Multiplayer](https://www.sa-mp.mp/downloads/) with [moonloader](https://www.blast.hk/threads/13305/) and [sampfuncs](https://www.blast.hk/threads/17/) installed. This version of script is laying in [gtasamp](Lua/gtasamp) folder.
+1. For [RakSAMP Lite](Raksamp/dlink.lua) - can be used with [RakSAMP Lite Bot](https://www.blast.hk/threads/108052/). This [script](Raksamp/dlink.lua) laying in [Raksamp](Raksamp) folder;
+2. For [GTA](gtasamp/dlink.lua) - can be used in PC version of [San Andreas Multiplayer](https://www.sa-mp.mp/downloads/) with [moonloader](https://www.blast.hk/threads/13305/) and [sampfuncs](https://www.blast.hk/threads/17/) installed. This version of script is laying in [gtasamp](gtasamp) folder.
 
 ## Script commands
 Are the same for both versions. You can use this commands via sampfuncs console in gta like `dlink start` or as chat command like `/dlink start`. Console commands in RakSAMP Lite have format like `!dlink start`
