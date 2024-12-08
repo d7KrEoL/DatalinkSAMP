@@ -8,16 +8,21 @@ local copas = require 'copas'
 local http = require 'copas.http'
 
 local lastTransmit = os.clock()
+local minimalTimeTimer = os.clock()
 
 local LongRageMarkers = {playername, isActiveMarker, coords = {x, y, z}}
 local AllEnemies = { room, name, objType, pos = {x, y, z}, vec = {x, y, z} }
+local RequestQueue = {}
 
 local vectorSpeedMultiplier = 50
 local transmitionInterval = 50
+local totalSockets = 0
+local minimalTime
+
 
 script_name("dlink")
 script_author("d7.KrEoL")
-script_version("07.12.24-unstable")
+script_version("08.12.24")
 script_url("https://vk.com/d7kreol")
 script_description("In-game tactical data exchange")
 
@@ -53,6 +58,7 @@ function main()
 	initVars()
 	while true do
 		onUpdate()
+		onSendRequests()
 		wait(0)
 	end
 end
@@ -64,6 +70,7 @@ end
 function initVars()
 	sampRegisterChatCommand("dlink", cmdDatalink)
 	sampfuncsRegisterConsoleCommand("dlink", cmdDatalink)
+	minimalTime = settings.maincfg.tickTime
 end
 
 function clearVars()
@@ -82,6 +89,7 @@ function sampev.onSendCommand(command)
 end
 
 function onUpdate()
+	if isGamePaused() then return end
 	if not sampIsLocalPlayerSpawned() then return end
 	if not settings.maincfg.enableTransmit then return end
 	if os.clock() - lastTransmit < settings.maincfg.tickTime then return end
@@ -91,6 +99,7 @@ function onUpdate()
 end
 
 function onUpdateSelf()
+	wait(transmitionInterval)
 	if not settings.maincfg.sendSelf then return end
 	local posX, posY, posZ = getCharCoordinates(playerPed)
 	local vecX = 0
@@ -110,47 +119,37 @@ function onUpdateSelf()
 	vecZ = posZ + vecZ
 				
 	local selfData = getSelfData({x = posX, y = posY, z = posZ}, {x = vecX, y = vecY, z = vecZ})
-
-	sendAlly(selfData)
+	if selfData then 
+		sendAlly(selfData)
+	end
 end
 
 function onUpdateEnemy()
+	wait(transmitionInterval)
 	if not settings.maincfg.sendTargets then return end
 	sendEnemies()
 end
 
 function sendAlly(data)
-	httpRequest(string.format("https://%s/tacxally?room=%s&name=%s&objectType=%s&posX=%s&posY=%s&posZ=%s&vecX=%s&vecY=%s&vecZ=%s", 
-				settings.maincfg.serverHost,
-				data.room,
-				data.name, 
-				data.objType,
-				data.pos.x,
-				data.pos.y,
-				data.pos.z,
-				data.vec.x,
-				data.vec.y,
-				data.vec.z
-				), 
-		nil, 
-		function(response, code, headers, status)
-		
-		if not response then
-			print("[SEND ALLY] Error: (response:", response, ")")
-			print("code: ", code, "headers:", headers, "status:", status)
-			print("{FF0000}emergency turn off")
-			settings.maincfg.enableTransmit = false
-		end
-	end)
-	lastTransmit = os.clock()
+	addRequest(string.format("https://%s/tacxally?room=%s&name=%s&objectType=%d&posX=%.2f&posY=%.2f&posZ=%.2f&vecX=%.2f&vecY=%.2f&vecZ=%.2f", 
+		settings.maincfg.serverHost,
+		data.room,
+		data.name, 
+		data.objType,
+		data.pos.x,
+		data.pos.y,
+		data.pos.z,
+		data.vec.x,
+		data.vec.y,
+		data.vec.z
+		))
 end
 
 function sendEnemies()
 	lua_thread.create(function()
-		for i = 0, #AllEnemies > settings.maincfg.maxPlayers and maxPlayers or #AllEnemies do
+		for i = 1, #AllEnemies > settings.maincfg.maxPlayers and maxPlayers or #AllEnemies do
 			if AllEnemies[i] ~= nil then
 				sendEnemy(AllEnemies[i])
-				wait(transmitionInterval)
 			end
 		end
 		ClearEnemiesData()
@@ -158,33 +157,22 @@ function sendEnemies()
 end
 
 function sendEnemy(data)
-	wait(settings.maincfg.tickTime)
-	httpRequest(string.format("https://%s/tacxenemy?room=%s&name=%s&objectType=%s&posX=%s&posY=%s&posZ=%s&vecX=%s&vecY=%s&vecZ=%s", 
-				settings.maincfg.serverHost,
-				data.room,
-				data.name, 
-				data.objType,
-				data.pos.x,
-				data.pos.y,
-				data.pos.z,
-				data.vec.x,
-				data.vec.y,
-				data.vec.z
-				), 
-		nil, 
-		function(response, code, headers, status)
-		
-		if not response then
-			print("[SEND ENEMY] Error: (response:", response, ")")
-			print("code: ", code, "headers:", headers, "status:", status)
-			print("{FF0000}emergency turn off")
-			settings.maincfg.enableTransmit = false
-		end
-	end)
-	lastTransmit = os.clock()
+	addRequest(string.format("https://%s/tacxenemy?room=%s&name=%s&objectType=%s&posX=%.2f&posY=%.2f&posZ=%.2f&vecX=%.2f&vecY=%.2f&vecZ=%.2f", 
+		settings.maincfg.serverHost,
+		data.room,
+		data.name, 
+		data.objType,
+		data.pos.x,
+		data.pos.y,
+		data.pos.z,
+		data.vec.x,
+		data.vec.y,
+		data.vec.z
+		))
 end
 
 function sampev.onVehicleSync(playerId, vehicleId, data)
+	if not settings.maincfg.enableTransmit then return markers end
 	if settings.maincfg.sendTargets then
 		AddEnemiesData({
 			room = settings.maincfg.serverName,
@@ -202,6 +190,7 @@ function sampev.onVehicleSync(playerId, vehicleId, data)
 end
 
 function sampev.onPlayerSync(playerId, data)
+	if not settings.maincfg.enableTransmit then return markers end
 	if settings.maincfg.sendTargets then
 
 		AddEnemiesData({
@@ -220,8 +209,8 @@ function sampev.onPlayerSync(playerId, data)
 end
 
 function ClearEnemiesData()
-	if (AllEnemies == nil) then return end
-	for i = 1, #AllEnemies do
+	if (AllEnemies == nil or #AllEnemies < 1) then return end
+	for i = 0, #AllEnemies do
 		AllEnemies[i] = nil
 	end
 end
@@ -233,8 +222,8 @@ end
 
 
 function isEnemiesDataExist(playerName)
-	if AllEnemies == nil then return end
-	if #AllEnemies < 1 then return end
+	if AllEnemies == nil or #AllEnemies < 1 then return end
+	if #AllEnemies < 0 then return end
 	for i = 0, #AllEnemies do
 		if AllEnemies[i] ~= nil then
 			if AllEnemies[i].name == playerName then return true end
@@ -243,7 +232,66 @@ function isEnemiesDataExist(playerName)
 	return false
 end
 
+
+function clearRequests()
+	if (RequestQueue == nil) then return end
+	for i = 1, #RequestQueue do
+		RequestQueue[i] = nil
+	end
+end
+
+function addRequest(request)
+	print("addReq", request)
+	if RequestQueue == nil then RequestQueue = {} end
+	if request == nil then return end
+	table.insert(RequestQueue, request)
+end
+
+function onSendRequests()
+	if RequestQueue == nil or #RequestQueue < 1 then return end
+	if totalSockets > settings.maincfg.maxPlayers then return end
+	minimalTimeTimer = os.clock()
+	for i = 0, #RequestQueue do
+		if RequestQueue[i] ~= nil then
+			print("totalSockets: ", totalSockets, "Req queue: ", #RequestQueue, " (requests)")
+			totalSockets = totalSockets + 1
+			httpRequest( 
+			RequestQueue[i], 
+			nil, 
+			function(response, code, header, status)
+				if response then
+					if response == "false" then print("data transmitted, but not accepted by server") end
+					totalSockets = totalSockets - 1
+				else
+					print("failure", code)
+				end
+			end)
+			wait(transmitionInterval)
+		end
+	end
+	clearRequests()
+	
+	lastTransmit = os.clock()
+	minimalTime = lastTransmit - minimalTimeTimer
+	if settings.maincfg.tickTime > minimalTime then 
+		settings.maincfg.tickTime = minimalTime 
+		inicfg.save(settings, "datalinksa") 
+		print("tickTime is lower then each transmision time. Set ticktime to safe value: ", settings.maincfg.tickTime)
+	end
+end
+
+function onRequestRespond(respond)
+	allowRequest = true
+	print("data sent")
+end
+
+function onRequestError(data)
+	allowRequest = true
+	print("data sending error")
+end
+
 function sampev.onMarkersSync(markers)
+	if not settings.maincfg.enableTransmit then return markers end
 	if settings.maincfg.sendTargets then
 		local playerid, isActiveMarker, pos
 		ClearMarkersData()
@@ -261,24 +309,16 @@ function ClearMarkersData()
 end
 
 function AddMarkersData(marker)
-	if (LongRageMarkers == nil) then return end
-	lua_thread.create(function()
-		if marker.active then
-			wait(0)
-			local playerName = sampGetPlayerNickname(marker.playerId)
-			if isEnemiesDataExist(playerName) then return end
-			table.insert(LongRageMarkers, 
-			{
-				playername = playerName, 
-				isActiveMarker = marker.active, 
-				coords = {x = marker.coords.x, y = marker.coords.y, z = marker.coords.z}
-			})
-		end
-	end)
+	if (LongRageMarkers == nil) then LongRageMarkers = {} end
+	if marker.active then
+		local playerName = sampGetPlayerNickname(marker.playerId)
+		if isEnemiesDataExist(playerName) then return end
+		table.insert(LongRageMarkers, {playername = playerName, isActiveMarker = marker.active, coords = {x = marker.coords.x, y = marker.coords.y, z = marker.coords.z}})
+	end
 end
 
 function onUpdateMarkers()
-	if (LongRageMarkers == nil) then return end
+	if (LongRageMarkers == nil) then LongRageMarkers = {} end
 	if not settings.maincfg.sendMarkers then return end
 	if #LongRageMarkers > 0 then
 		local packetCounter = 0
@@ -287,8 +327,8 @@ function onUpdateMarkers()
 end
 
 function onUpdateMarkersTask()
-	wait(10)
-	for i = 1, #LongRageMarkers do
+	if LongRageMarkers == nil or #LongRageMarkers < 1 then return end
+	for i = 0, #LongRageMarkers do
 		if not(LongRageMarkers[i] == nil) then
 			local enemyData =  
 				{ 
@@ -306,7 +346,9 @@ end
 function getSelfData(position, vector)
 	local allyData = { room, name, objType, pos = {x, y, z}, vec = {x, y, z} }
 	allyData.room = settings.maincfg.serverName
-	allyData.name = sampGetPlayerNickname(playerHandle)
+	local result, playerid = sampGetPlayerIdByCharHandle(playerPed)
+	if not result then return end
+	allyData.name = sampGetPlayerNickname(playerid)
 	allyData.objType = 1
 	
 	allyData.pos.x = position.x
@@ -321,15 +363,18 @@ function getSelfData(position, vector)
 end
 
 function httpRequest(request, body, handler)
+	if totalSockets > 10 then return end
     if not copas.running then
         copas.running = true
         lua_thread.create(function()
             wait(0)
             while not copas.finished() do
+				totalSockets = totalSockets + 1
                 local ok, err = copas.step(0)
                 if ok == nil then error(err) end
                 wait(0)
             end
+			totalSockets = 0
             copas.running = false
         end)
     end
@@ -371,7 +416,6 @@ function cmdDatalink(arg)
 		local args = {}
 		for str in string.gmatch(arg, "([^".." ".."]+)") do
 			table.insert(args, str)
-			print("str:", str)
 		end
 		
 		if (args[1] == "sendSelf") then 
@@ -415,12 +459,16 @@ function cmdDatalink(arg)
 			inicfg.save(settings, "datalinksa")
 			print("receiveUnknown=", settings.maincfg.receiveUnknown)
 		elseif (args[1] == "tickTime") then 
-			if (#args < 3) then
+			if (#args < 2) then
 				print("tickTime=", settings.maincfg.tickTime)
+				inicfg.save(settings, "datalinksa")
 				return
 			end
-			settings.maincfg.tickTime = tonumber(args[3])
-			if settings.maincfg.tickTime < 1 then settings.maincfg.tickTime = 1 end
+			settings.maincfg.tickTime = tonumber(args[2])
+			if settings.maincfg.tickTime < minimalTime then 
+				settings.maincfg.tickTime = minimalTime 
+				print("your value is less then minimal for current server. Minimal safe value (", settings.maincfg.tickTime, ") is set")
+			end
 			inicfg.save(settings, "datalinksa")
 		elseif (args[1] == "maxPlayers") then 
 			if (#args < 2) then
@@ -436,6 +484,7 @@ function cmdDatalink(arg)
 		elseif (args[1] == "stop" or args[1] == "disconnect") then 
 			print("datalink transmition disabled")
 			settings.maincfg.enableTransmit = false
+			clearRequests()
 		elseif (args[1] == "serverHost" or args[1] == "hostURL") then
 			if (#args < 2) then 
 				print("serverHost=", settings.maincfg.serverHost) 
