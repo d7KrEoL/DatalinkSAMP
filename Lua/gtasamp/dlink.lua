@@ -22,7 +22,7 @@ local minimalTime
 
 script_name("dlink")
 script_author("d7.KrEoL")
-script_version("08.12.24")
+script_version(Ver)
 script_url("https://vk.com/d7kreol")
 script_description("In-game tactical data exchange")
 
@@ -131,6 +131,7 @@ function onUpdateEnemy()
 end
 
 function sendAlly(data)
+	print("sendAlly", data.name)
 	addRequest(string.format("https://%s/tacxally?room=%s&name=%s&objectType=%d&posX=%.2f&posY=%.2f&posZ=%.2f&vecX=%.2f&vecY=%.2f&vecZ=%.2f", 
 		settings.maincfg.serverHost,
 		data.room,
@@ -146,6 +147,7 @@ function sendAlly(data)
 end
 
 function sendEnemies()
+	if AllEnemies == nil then AllEnemies = {} end
 	lua_thread.create(function()
 		for i = 1, #AllEnemies > settings.maincfg.maxPlayers and maxPlayers or #AllEnemies do
 			if AllEnemies[i] ~= nil then
@@ -157,6 +159,7 @@ function sendEnemies()
 end
 
 function sendEnemy(data)
+	print("sendEnemy", data.name)
 	addRequest(string.format("https://%s/tacxenemy?room=%s&name=%s&objectType=%s&posX=%.2f&posY=%.2f&posZ=%.2f&vecX=%.2f&vecY=%.2f&vecZ=%.2f", 
 		settings.maincfg.serverHost,
 		data.room,
@@ -213,31 +216,41 @@ function ClearEnemiesData()
 	for i = 0, #AllEnemies do
 		AllEnemies[i] = nil
 	end
+	AllEnemies = nil
 end
 
 function AddEnemiesData(data)
-	if isEnemiesDataExist(data.name) then return end
-	table.insert(AllEnemies, data)
+	if AllEnemies == nil then AllEnemies = {} end
+	print("Exist: ", data.name, isEnemiesDataExist(data.name) > -1 and "{00FF00}true" or "{FF0000}false")
+	local enemyData = isEnemiesDataExist(data.name)
+	if enemyData > -1 then 
+		AllEnemies[enemyData] = data 
+	else 
+		table.insert(AllEnemies, data)
+	end
 end
 
 
 function isEnemiesDataExist(playerName)
-	if AllEnemies == nil or #AllEnemies < 1 then return end
-	if #AllEnemies < 0 then return end
+	if AllEnemies == nil or #AllEnemies < 1 then AllEnemies = {} end
+	if #AllEnemies < 1 then return -1 end
 	for i = 0, #AllEnemies do
 		if AllEnemies[i] ~= nil then
-			if AllEnemies[i].name == playerName then return true end
+			if AllEnemies[i].name == playerName then 
+				return i
+			end
 		end
 	end
-	return false
+	return -1
 end
 
 
 function clearRequests()
 	if (RequestQueue == nil) then return end
-	for i = 1, #RequestQueue do
+	for i = 0, #RequestQueue do
 		RequestQueue[i] = nil
 	end
+	RequestQueue = nil
 end
 
 function addRequest(request)
@@ -270,6 +283,8 @@ function onSendRequests()
 		end
 	end
 	clearRequests()
+	ClearEnemiesData()
+	ClearMarkersData()
 	
 	lastTransmit = os.clock()
 	minimalTime = lastTransmit - minimalTimeTimer
@@ -278,16 +293,6 @@ function onSendRequests()
 		inicfg.save(settings, "datalinksa") 
 		print("tickTime is lower then each transmision time. Set ticktime to safe value: ", settings.maincfg.tickTime)
 	end
-end
-
-function onRequestRespond(respond)
-	allowRequest = true
-	print("data sent")
-end
-
-function onRequestError(data)
-	allowRequest = true
-	print("data sending error")
 end
 
 function sampev.onMarkersSync(markers)
@@ -306,14 +311,30 @@ function ClearMarkersData()
 	for i = 1, #LongRageMarkers do
 		LongRageMarkers[i] = nil
 	end
+	LongRageMarkers = nil
+end
+
+function getMarkersDataIndex(playerName)
+	local result = -1
+	for i = 1, #LongRageMarkers do
+		if LongRageMarkers[i].playername == playerName then return i end
+	end
+	return result
 end
 
 function AddMarkersData(marker)
 	if (LongRageMarkers == nil) then LongRageMarkers = {} end
 	if marker.active then
 		local playerName = sampGetPlayerNickname(marker.playerId)
-		if isEnemiesDataExist(playerName) then return end
-		table.insert(LongRageMarkers, {playername = playerName, isActiveMarker = marker.active, coords = {x = marker.coords.x, y = marker.coords.y, z = marker.coords.z}})
+		if isEnemiesDataExist(playerName) ~= -1 then return end
+		local playerIndex = getMarkersDataIndex(playerName)
+		if (playerIndex > -1) then
+			LongRageMarkers[i] = {playername = playerName, isActiveMarker = marker.active, coords = {x = marker.coords.x, y = marker.coords.y, z = marker.coords.z}}
+			print("Marker Data rewrite", playerName, "(total count: ", #LongRageMarkers, ")")
+		else
+			table.insert(LongRageMarkers, {playername = playerName, isActiveMarker = marker.active, coords = {x = marker.coords.x, y = marker.coords.y, z = marker.coords.z}})
+			print("Marker Data write", playerName, "(total count: ", #LongRageMarkers, ")")
+		end
 	end
 end
 
@@ -338,9 +359,10 @@ function onUpdateMarkersTask()
 					pos = {x = LongRageMarkers[i].coords.x, y = LongRageMarkers[i].coords.y, z = LongRageMarkers[i].coords.z}, 
 					vec = {x = LongRageMarkers[i].coords.x, y = LongRageMarkers[i].coords.y, z = LongRageMarkers[i].coords.z}
 				}
-			sendEnemy(enemyData)
+			if isEnemiesDataExist(enemyData.name) == -1 then sendEnemy(enemyData) end
 		end
 	end
+	ClearMarkersData()
 end
 
 function getSelfData(position, vector)
@@ -480,11 +502,13 @@ function cmdDatalink(arg)
 			inicfg.save(settings, "datalinksa")	
 		elseif (args[1] == "start" or args[1] == "connect") then 
 			print("datalink transmition enabled")
+			clearRequests()
 			settings.maincfg.enableTransmit = true
+			inicfg.save(settings, "datalinksa")	
 		elseif (args[1] == "stop" or args[1] == "disconnect") then 
 			print("datalink transmition disabled")
 			settings.maincfg.enableTransmit = false
-			clearRequests()
+			inicfg.save(settings, "datalinksa")	
 		elseif (args[1] == "serverHost" or args[1] == "hostURL") then
 			if (#args < 2) then 
 				print("serverHost=", settings.maincfg.serverHost) 
