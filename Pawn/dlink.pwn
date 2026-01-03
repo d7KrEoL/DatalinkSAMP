@@ -12,7 +12,7 @@
 forward sendEnemy(room[], name[], type, Float:posX, Float:posY, Float:posZ, Float:vecX, Float:vecY, Float:vecZ);
 //  Send single ally player data
 forward sendAlly(room[], name[], type, Float:posX, Float:posY, Float:posZ, Float:vecX, Float:vecY, Float:vecZ);
-//  Send single any player data with delay
+//  Send single player data with delay
 forward autoSendPlayer(playerid);
 //  Send all selected by rule players (rule depends of script working mode)
 forward OnDatalinkUpdate();
@@ -237,6 +237,13 @@ public autoSendPlayer(playerid)
 	vecY = posY + (vecY * SPEED_VECTOR_MULTIPLIER);
 	vecZ = posZ + (vecZ * SPEED_VECTOR_MULTIPLIER);
 	
+	for (new i = 0; i < sizeof(playerName); i++)
+	{
+		if(playerName[i] == '[')
+		    playerName[i] = '(';
+		else if (playerName[i] == ']')
+		    playerName[i] = ')';
+	}
 	if (GetPlayerTeam(playerid) < ENEMY_TEAM_DELIM)
 	    sendEnemy(dlinkRoom, playerName, 1, posX, posY, posZ, vecX, vecY, vecZ);
 	else
@@ -276,15 +283,30 @@ public sendEnemy(room[], name[], type, Float:posX, Float:posY, Float:posZ, Float
 @OnSendEnemyResult(Request:id, E_HTTP_STATUS:status, data[], dataLen);
 @OnSendEnemyResult(Request:id, E_HTTP_STATUS:status, data[], dataLen)
 {
-	if (!strcmp(data, "false", true, dataLen))
-	    printf("Cannot send enemy: %s %d", data, dataLen);
+	if (strcmp(data, "true", true, dataLen))
+	    printf("Cannot send enemy:\n%s\nLen:%d", data, dataLen);
 }
 
 //  When failed to send any request
 forward OnRequestFailure(Request:id, errorCode, errorMessage[], len);
 public OnRequestFailure(Request:id, errorCode, errorMessage[], len)
 {
-	print("\nDatalink error: failed to connect. Script will now be deactivated.\nTo make it active again use RCON command: dlinkActive\n");
+	new message[256];
+	format(message, sizeof(message), "\n[!]Datalink send request error:\nError code: %d", errorCode);
+	switch (errorCode)
+	{
+		case 1:
+		{
+		    format(message, sizeof(message), "%s (Cannot connect)", message);
+		}
+		default:
+		{
+		    format(message, sizeof(message), "%s (Unexpected exception)", message);
+		}
+	}
+	format(message, sizeof(message), "%s\nError message (UTF-8): %s\n", message, errorMessage);
+	print(message);
+	print("\nScript will now be deactivated.\nTo make it active again use RCON command: dlinkActive\n");
 }
 
 public sendAlly(room[], name[], type, Float:posX, Float:posY, Float:posZ, Float:vecX, Float:vecY, Float:vecZ)
@@ -319,8 +341,8 @@ public sendAlly(room[], name[], type, Float:posX, Float:posY, Float:posZ, Float:
 @OnSendAllyResult(Request:id, E_HTTP_STATUS:status, data[], dataLen);
 @OnSendAllyResult(Request:id, E_HTTP_STATUS:status, data[], dataLen)
 {
-	if (!strcmp(data, "false", true, dataLen))
-	    printf("Cannot send ally: %s %d", data, dataLen);
+	if (strcmp(data, "true", true, dataLen))
+	    printf("Cannot send ally:\n%s\nLen: %d", data, dataLen);
 }
 
 //  Checks connection to remote host
@@ -329,9 +351,9 @@ stock TestConnection()
 	dlinkMode = 0;
 
 	new name[24];
-	format(name, sizeof(name), "TestPawnEnemyInit");
+	format(name, sizeof(name), "SampServerConnected");
 	sendEnemy(dlinkRoom, name, 1, 1024.23423, 2048.32423, 50, 1048.43432, 2091.4324454, 50);
-	format(name, sizeof(name), "TestPawnAllyInit");
+	format(name, sizeof(name), "SampServerConnected");
 	sendAlly(dlinkRoom, name, 1, 2048, 1024, 100, 2091, 1048, 100);
 }
 
